@@ -143,6 +143,8 @@ def main():
         db_connection=db_connection,
         destination_full_path=destination_full_path)
 
+    db_connection.dispose()
+
 
 if __name__ == '__main__':
     main()

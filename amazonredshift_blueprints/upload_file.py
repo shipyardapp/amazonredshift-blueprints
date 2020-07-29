@@ -140,7 +140,7 @@ def main():
 
     db_string = create_connection_string(args)
     try:
-        db_connection = create_engine(db_string, pool_pre_ping=True)
+        db_connection = create_engine(db_string)
     except Exception as e:
         print(f'Failed to connect to database {database}')
         raise(e)
