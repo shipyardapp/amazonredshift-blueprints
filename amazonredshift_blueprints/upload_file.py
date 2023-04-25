@@ -1,9 +1,10 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, MetaData
 import argparse
 import os
 import glob
 import re
 import pandas as pd
+import sqlalchemy
 
 
 def get_args():
@@ -52,6 +53,7 @@ def get_args():
         '--db-connection-url',
         dest='db_connection_url',
         required=False)
+    parser.add_argument('--schema', dest = 'schema', required = False, default = 'public')
     args = parser.parse_args()
 
     if not args.db_connection_url and not (
@@ -149,10 +151,15 @@ def main():
         folder_name=source_folder_name, file_name=source_file_name)
     table_name = args.table_name
     insert_method = args.insert_method
+    schema = args.schema
 
     db_string = create_connection_string(args)
     try:
         db_connection = create_engine(db_string)
+        if schema != 'public':
+            meta = MetaData(schema = schema, bind = db_connection, reflect = True)
+            tables = meta.tables[f'{schema}.{table_name}'
+
     except Exception as e:
         print(f'Failed to connect to database {database}')
         raise(e)
