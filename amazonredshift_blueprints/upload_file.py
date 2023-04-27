@@ -152,14 +152,14 @@ def main():
     table_name = args.table_name
     insert_method = args.insert_method
     schema = args.schema
+    database = args.database
 
     db_string = create_connection_string(args)
     try:
         db_connection = create_engine(db_string)
         if schema != 'public':
             meta = MetaData(schema = schema, bind = db_connection, reflect = True)
-            tables = meta.tables[f'{schema}.{table_name}'
-
+            tables = meta.tables[f'{schema}.{table_name}']
     except Exception as e:
         print(f'Failed to connect to database {database}')
         raise(e)
