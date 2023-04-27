@@ -156,7 +156,7 @@ def main():
 
     db_string = create_connection_string(args)
     try:
-        db_connection = create_engine(db_string)
+        db_connection = create_engine(db_string, connect_args={'options': '-c standard_conforming_strings=on'})
         if schema != 'public':
             db_connection.connect().execute(f'SET search_path TO {schema}')
             # meta = MetaData(schema = schema, bind = db_connection, reflect = True)
