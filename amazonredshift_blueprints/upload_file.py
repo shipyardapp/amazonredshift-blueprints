@@ -158,8 +158,10 @@ def main():
     try:
         db_connection = create_engine(db_string)
         if schema != 'public':
-            meta = MetaData(schema = schema, bind = db_connection, reflect = True)
-            tables = meta.tables[f'{schema}.{table_name}']
+            db_connection.connect().execute(f'SET search_path TO {schema}')
+            # meta = MetaData(schema = schema, bind = db_connection, reflect = True)
+            
+            # tables = meta.tables[f'{schema}.{table_name}']
     except Exception as e:
         print(f'Failed to connect to database {database}')
         raise(e)
