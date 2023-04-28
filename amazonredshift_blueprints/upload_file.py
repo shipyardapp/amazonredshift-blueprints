@@ -52,6 +52,7 @@ def get_args():
         '--db-connection-url',
         dest='db_connection_url',
         required=False)
+    parser.add_argument('--schema', dest = 'schema', required = False, default = '')
     args = parser.parse_args()
 
     if not args.db_connection_url and not (
@@ -120,8 +121,13 @@ def combine_folder_and_file_name(folder_name, file_name):
     return combined_name
 
 
-def upload_data(source_full_path, table_name, insert_method, db_connection):
+def upload_data(source_full_path, table_name, insert_method, db_connection, schema = None):
    # Resort to chunks for larger files to avoid memory issues.
+    if schema is not None:
+        print(f"Switching to schema {schema}")
+        conn = db_connection.connect()
+        conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        conn.execute(f'SET search_path TO {schema}')
     for index, chunk in enumerate(
             pd.read_csv(source_full_path, chunksize=10000)):
 
@@ -149,6 +155,11 @@ def main():
         folder_name=source_folder_name, file_name=source_file_name)
     table_name = args.table_name
     insert_method = args.insert_method
+    database = args.database
+    schema = args.schema
+    if schema == '':
+        schema = None
+
 
     db_string = create_connection_string(args)
     try:
@@ -168,11 +179,11 @@ def main():
                 source_full_path=key_name,
                 table_name=table_name,
                 insert_method=insert_method,
-                db_connection=db_connection)
+                db_connection=db_connection, schema = schema)
 
     else:
         upload_data(source_full_path=source_full_path, table_name=table_name,
-                    insert_method=insert_method, db_connection=db_connection)
+                    insert_method=insert_method, db_connection=db_connection, schema = schema)
 
     db_connection.dispose()
 
