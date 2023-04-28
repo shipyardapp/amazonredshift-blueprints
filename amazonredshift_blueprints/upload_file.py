@@ -5,6 +5,7 @@ import glob
 import re
 import pandas as pd
 import sqlalchemy
+import redshift_connector
 
 
 def get_args():
@@ -75,6 +76,45 @@ def get_args():
     return args
 
 
+def map_datatypes(pandas_type:str) -> str:
+    """ Maps the pandas datatype to the corresponding SQL data type
+
+    Args:
+        pandas_type (str): the pandas datatype
+    """
+    if pandas_type == 'object':
+        return 'VARCHAR(255)'
+    elif pandas_type == 'int64':
+        return 'INT'
+    elif pandas_type == 'float64':
+        return 'FLOAT'
+    elif pandas_type == 'bool':
+        return 'BOOLEAN'
+    elif pandas_type == 'datetime64':
+        return 'DATETIME'
+    elif pandas_type == 'timedelta[ns]':
+        return 'INTERVAL'
+    elif pandas_type == 'category':
+        return 'VARCHAR(255)'
+    else:
+        return 'VARCHAR(255)'
+
+def create_table_query(table_name:str, df:pd.DataFrame, database:str, schema:str = 'public') -> str:
+    """ Generates a create table sql command that translates the pandas data types to the appropriate sql data types
+    Args:
+        table_name: The name of the SQL table
+        df: The data frame to load
+
+    Returns: The create table sql command
+        
+    """
+    cols = df.columns
+    # populate the query with the columns and the datatypes
+    columns = ',\n'.join([f'{col} {map_datatypes(str(df[col].dtype))}' for col in df.columns])
+    query = f"CREATE TABLE IF NOT EXISTS {database}.{schema}.{table_name} (\n{columns}\n);"
+    return query
+
+
 def create_connection_string(args):
     """
     Set the database connection string as an environment variable using the keyword arguments provided.
@@ -122,7 +162,7 @@ def combine_folder_and_file_name(folder_name, file_name):
     return combined_name
 
 
-def upload_data(source_full_path, table_name, insert_method, db_connection):
+def upload_data(source_full_path, table_name, insert_method, db_connection, schema = 'public'):
    # Resort to chunks for larger files to avoid memory issues.
     for index, chunk in enumerate(
             pd.read_csv(source_full_path, chunksize=10000)):
@@ -131,14 +171,22 @@ def upload_data(source_full_path, table_name, insert_method, db_connection):
             # First chunk replaces the table, the following chunks
             # append to the end.
             insert_method = 'append'
+            # cursor.execute(f"select * from {table_name}")
+            # result = cursor.fetchall()
+        query = create_table_query(table_name, chunk, database = db_connection._database, schema= schema)
+        cursor = db_connection.cursor()
+        cursor.execute(query)
+        cursor.write_dataframe(chunk, table_name)
+    db_connection.commit()
 
-        chunk.to_sql(
-            table_name,
-            con=db_connection,
-            index=False,
-            if_exists=insert_method,
-            method='multi',
-            chunksize=10000)
+        # chunk.to_sql(
+        #     table_name,
+        #     con=db_connection,
+        #     index=False,
+        #     if_exists=insert_method,
+        #     method='multi',
+        #     chunksize=10000)
+
     print(f'{source_full_path} successfully uploaded to {table_name}.')
 
 
@@ -153,15 +201,26 @@ def main():
     insert_method = args.insert_method
     schema = args.schema
     database = args.database
+    host = args.host
+    user = args.username
+    pwd = args.password
 
-    db_string = create_connection_string(args)
+
+    # db_string = create_connection_string(args)
+    db_connection = redshift_connector.connect(
+        host = host,
+        database = database,
+        user = user,
+        password = pwd
+    )
     try:
-        db_connection = create_engine(db_string, connect_args={'options': '-c standard_conforming_strings=on'})
+        # db_connection = create_engine(db_string, connect_args={'options': '-c standard_conforming_strings=on'})
         if schema != 'public':
-            db_connection.connect().execute(f'SET search_path TO {schema}')
-            # meta = MetaData(schema = schema, bind = db_connection, reflect = True)
+            cursor = db_connection.cursor()
+            cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+            cursor.execute(f'SET search_path TO {schema}')
+            db_connection.commit()
             
-            # tables = meta.tables[f'{schema}.{table_name}']
     except Exception as e:
         print(f'Failed to connect to database {database}')
         raise(e)
@@ -177,13 +236,14 @@ def main():
                 source_full_path=key_name,
                 table_name=table_name,
                 insert_method=insert_method,
-                db_connection=db_connection)
+                db_connection=db_connection,
+                schema = schema)
 
     else:
         upload_data(source_full_path=source_full_path, table_name=table_name,
-                    insert_method=insert_method, db_connection=db_connection)
+                    insert_method=insert_method, db_connection=db_connection, schema = schema)
 
-    db_connection.dispose()
+    db_connection.close()
 
 
 if __name__ == '__main__':
