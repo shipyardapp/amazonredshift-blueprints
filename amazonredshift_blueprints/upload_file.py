@@ -235,7 +235,6 @@ def main():
     if schema == '':
         schema = None
 
-    # db_string = create_connection_string(args)
     db_string = create_connection_url(host = host, password = password, user = user, database = database)
     try:
         db_connection = create_engine(db_string)

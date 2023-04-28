@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, text
 import argparse
 import os
+from sqlalchemy.engine.url import URL
 
 
 def get_args():
@@ -54,18 +55,26 @@ def create_connection_string(args):
     db_string = os.environ.get('DB_CONNECTION_URL')
     return db_string
 
+def create_connection_url(host:str, password:str, user:str, database:str,port = 5439):
+    url = URL.create(drivername= 'redshift+redshift_connector', host = host, password= password, username= user, port = port, database=database)
+    return url
 
 def main():
     args = get_args()
     query = text(args.query)
+    database = args.database
+    host = args.host
+    password = args.password
+    user = args.username
+    port = args.port
 
-    db_string = create_connection_string(args)
+    # db_string = create_connection_string(args)
+    db_string = create_connection_url(host = host , password = password, user = user, database = database, port = port)
     try:
         db_connection = create_engine(db_string)
     except Exception as e:
         print(f'Failed to connect to database {database}')
         raise(e)
-
     db_connection.execute(query)
     db_connection.dispose()
     print('Your query has been successfully executed.')
