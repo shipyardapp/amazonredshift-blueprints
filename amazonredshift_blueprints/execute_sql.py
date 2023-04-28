@@ -68,7 +68,6 @@ def main():
     user = args.username
     port = args.port
 
-    # db_string = create_connection_string(args)
     db_string = create_connection_url(host = host , password = password, user = user, database = database, port = port)
     try:
         db_connection = create_engine(db_string)
