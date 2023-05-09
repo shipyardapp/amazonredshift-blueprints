@@ -1,11 +1,11 @@
-from sqlalchemy import create_engine
 import argparse
-import os
 import glob
+import os
 import re
+
 import pandas as pd
+from sqlalchemy import create_engine
 from sqlalchemy.engine.url import URL
-from sqlalchemy.orm import sessionmaker
 
 
 def get_args():
@@ -54,7 +54,7 @@ def get_args():
         '--db-connection-url',
         dest='db_connection_url',
         required=False)
-    parser.add_argument('--schema', dest = 'schema', required = False, default = '')
+    parser.add_argument('--schema', dest='schema', required=False, default='')
     args = parser.parse_args()
 
     if not args.db_connection_url and not (
@@ -76,21 +76,10 @@ def get_args():
     return args
 
 
-def create_connection_url(host:str, password:str, user:str, database:str,port = 5439):
-    url = URL.create(drivername= 'redshift+redshift_connector', host = host, password= password, username= user, port = port, database=database)
+def create_connection_url(host: str, password: str, user: str, database: str, port=5439):
+    url = URL.create(drivername='redshift+redshift_connector', host=host, password=password, username=user, port=port,
+                     database=database)
     return url
-def create_connection_string(args):
-    """
-    Set the database connection string as an environment variable using the keyword arguments provided.
-    This will override system defaults.
-    """
-    if args.db_connection_url:
-        os.environ['DB_CONNECTION_URL'] = args.db_connection_url
-    elif (args.host and args.username and args.database):
-        os.environ['DB_CONNECTION_URL'] = f'postgresql://{args.username}:{args.password}@{args.host}:{args.port}/{args.database}?{args.url_parameters}'
-
-    db_string = os.environ.get('DB_CONNECTION_URL')
-    return db_string
 
 
 def find_all_local_file_names(source_folder_name):
@@ -125,95 +114,44 @@ def combine_folder_and_file_name(folder_name, file_name):
 
     return combined_name
 
-def map_datatypes(pandas_type:str) -> str:
-    """ Maps the pandas datatype to the corresponding SQL data type
-    Args:
-        pandas_type (str): the pandas datatype
-    """
-    if pandas_type == 'object':
-        return 'VARCHAR(255)'
-    elif pandas_type == 'int64':
-        return 'INT'
-    elif pandas_type == 'float64':
-        return 'FLOAT'
-    elif pandas_type == 'bool':
-        return 'BOOLEAN'
-    elif pandas_type == 'datetime64':
-        return 'DATETIME'
-    elif pandas_type == 'timedelta[ns]':
-        return 'INTERVAL'
-    elif pandas_type == 'category':
-        return 'VARCHAR(255)'
-    else:
-        return 'VARCHAR(255)'
 
-def create_table_query(table_name:str, df:pd.DataFrame, database:str, schema:str = 'public') -> str:
-    """ Generates a create table sql command that translates the pandas data types to the appropriate sql data types
-    Args:
-        table_name: The name of the SQL table
-        df: The data frame to load
-    Returns: The create table sql command
-        
-    """
-    cols = df.columns
-    # populate the query with the columns and the datatypes
-    columns = ',\n'.join([f' "{col}" {map_datatypes(str(df[col].dtype))}' for col in df.columns])
-    query = f"CREATE TABLE IF NOT EXISTS {database}.{schema}.{table_name} (\n{columns}\n);"
-    return query
+def upload_data(source_full_path, table_name, insert_method, db_connection, schema=None):
+    # Resort to chunks for larger files to avoid memory issues.
+    chunk_size = 10000
 
-
-def upload_data(source_full_path, table_name, insert_method, db_connection,database,schema = None):
-   # Resort to chunks for larger files to avoid memory issues.
-   # in order to load to a different schema we will have to 
-   # 1. Load to public
-   # 2. Copy from public into the desired schema
-   # 3. Drop the table from public
     conn = db_connection.connect()
-    if schema is not None:
+    if schema:
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        for index, chunk in enumerate(
-                pd.read_csv(source_full_path, chunksize=10000)):
-            if index == 0:
-                query = create_table_query(table_name, chunk,database, schema= schema )
-                conn.execute(query)
 
-            if insert_method == 'replace' and index > 0:
-                # First chunk replaces the table, the following chunks
-                # append to the end.
-                insert_method = 'append'
-
+    for index, chunk in enumerate(pd.read_csv(source_full_path, chunksize=chunk_size)):
+        '''
+        For the first iteration of the loop, we will either drop the table or append to it based on the user's input.
+        The following iterations will always append to the table.
+        '''
+        if index != 0:
+            insert_method = 'append'
+        if schema:
+            chunk.to_sql(
+                table_name,
+                con=db_connection,
+                index=False,
+                schema=schema,
+                if_exists=insert_method,
+                method='multi',
+                chunksize=chunk_size
+            )
+        elif not schema:
             chunk.to_sql(
                 table_name,
                 con=db_connection,
                 index=False,
                 if_exists=insert_method,
                 method='multi',
-                chunksize=10000)
-        # copy over from public to new table
-        print(f"Copying table into {schema}")
-        copy_query = f"INSERT INTO {schema}.{table_name} (SELECT * FROM {table_name})"
-        conn.execute(copy_query)
-        drop_query = f"DROP TABLE public.{table_name}"
+                chunksize=chunk_size
+            )
+    if schema:
         print(f'{source_full_path} successfully uploaded to {schema}.{table_name}.')
-        
-    
     else:
-        for index, chunk in enumerate(
-                pd.read_csv(source_full_path, chunksize=10000)):
-
-            if insert_method == 'replace' and index > 0:
-                # First chunk replaces the table, the following chunks
-                # append to the end.
-                insert_method = 'append'
-
-            chunk.to_sql(
-                table_name,
-                con=db_connection,
-                index=False,
-                if_exists=insert_method,
-                method='multi',
-                chunksize=10000)
-
         print(f'{source_full_path} successfully uploaded to {table_name}.')
 
 
@@ -235,12 +173,16 @@ def main():
     if schema == '':
         schema = None
 
-    db_string = create_connection_url(host = host, password = password, user = user, database = database)
+    if port in ('', None):
+        db_string = create_connection_url(host=host, password=password, user=user, database=database)
+    else:
+        db_string = create_connection_url(host=host, password=password, user=user, database=database, port=port)
+
     try:
         db_connection = create_engine(db_string)
     except Exception as e:
         print(f'Failed to connect to database {database}')
-        raise(e)
+        raise (e)
 
     if source_file_name_match_type == 'regex_match':
         file_names = find_all_local_file_names(source_folder_name)
@@ -253,12 +195,18 @@ def main():
                 source_full_path=key_name,
                 table_name=table_name,
                 insert_method=insert_method,
-                database= database,
-                db_connection=db_connection, schema = schema)
+                db_connection=db_connection,
+                schema=schema
+            )
 
     else:
-        upload_data(source_full_path=source_full_path, table_name=table_name,
-                    insert_method=insert_method, db_connection=db_connection,database= database, schema = schema)
+        upload_data(
+            source_full_path=source_full_path,
+            table_name=table_name,
+            insert_method=insert_method,
+            db_connection=db_connection,
+            schema=schema
+        )
 
     db_connection.dispose()
 
